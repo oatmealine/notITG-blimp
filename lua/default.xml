@@ -1,0 +1,362 @@
+<ActorFrame
+InitCommand="%function(self)
+
+	songName = GAMESTATE:GetCurrentSong():GetSongDir();
+	
+	m_bl = 60/180
+	screen = SCREENMAN:GetTopScreen()
+	sw = SCREEN_WIDTH
+	sh = SCREEN_HEIGHT --shortcuts
+
+	-- The multiplier of the aft sprites' alpha value.
+  aftMult = 1;
+
+  -- If the user is using a Nvidia graphic card, they have some issues with alphas of sprites.
+  if tonumber(GAMESTATE:GetVersionDate()) >= 20170405 and string.find(string.lower(DISPLAY:GetVendor()), 'nvidia')
+  or string.find(string.lower(PREFSMAN:GetPreference('LastSeenVideoDriver')), 'nvidia') then
+    aftMult = 0.9; -- Setting the alpha multiplier to 0.9.
+  end
+	
+end"
+><children>
+
+	<Layer
+		Type="Quad"
+		InitCommand="hidden,1"
+		OnCommand="sleep,1000"
+	/>
+
+	<Layer File="modhelpers" />
+	<Layer File="easing" />
+
+	<Layer
+    Type="Sprite"
+    Texture="white"
+    InitCommand="%function(self)
+
+      aftSprite = self;
+
+      self:basezoomx((SCREEN_WIDTH/DISPLAY:GetDisplayWidth()));
+      self:basezoomy(-1*(SCREEN_HEIGHT/DISPLAY:GetDisplayHeight()))
+      self:x(SCREEN_CENTER_X);
+      self:y(SCREEN_CENTER_Y);
+
+			self:zoom(1);
+      self:diffusealpha(0.0);
+    end"
+  />
+
+  <Layer
+    Type="ActorFrameTexture"
+    InitCommand="%function(self)
+
+      aft = self;
+      self:SetWidth(DISPLAY:GetDisplayWidth());
+      self:SetHeight(DISPLAY:GetDisplayHeight());
+      self:EnableDepthBuffer(false);
+      self:EnableAlphaBuffer(true);
+      self:EnableFloat(false);
+      self:EnablePreserveTexture(true);
+      self:Create();
+
+      aftSprite:SetTexture(self:GetTexture()); -- Put the texture into the sprite above.
+          
+      end"
+  />
+
+	<Layer
+		Type="Quad"
+		OnCommand="hidden,1"
+		InitCommand="%function(self)
+		
+			screen = SCREENMAN:GetTopScreen()
+
+			checked = false;
+			mod_plr = {};		
+			mod_firstSeenBeat = GAMESTATE:GetSongBeat(); --necessary to prevent long freezes
+			
+---------------------------------------------------------------------------------------
+----------------------THIS IS THE PLACE TO PUT MODS AND STUFF--------------------------
+---------------------------------------------------------------------------------------
+
+			--beat based mods syntax:
+			--{beat_start, beat_end, mods, len_or_end, player_number}
+			mods = {}
+			mods2 = {}
+
+			--beat-based ease mods
+			--{beat_start, beat_end, mod_start, mod_end, mod, len_or_end, ease_type, player_number, sustainbeats, optional_param1, optional_param2}
+			--valid ease types are:
+				--linear
+				--inQuad    outQuad    inOutQuad    outInQuad
+				--inCubic   outCubic   inOutCubic   outInCubic
+				--inQuart   outQuart   inOutQuart   outInQuart
+				--inQuint   outQuint   inOutQuint   outInQuint
+				--inSine    outSine    inOutSine    outInSine
+				--inExpo    outExpo    inOutExpo    outInExpo
+				--inCirc    outCirc    inOutCirc    outInCirc
+				--inElastic outElastic inOutElastic outInElastic    --can take 2 optional parameters - amplitude & period
+				--inBack    outBack    inOutBack    outInBack       --can take 1 optional parameter  - spring amount
+				--inBounce  outBounce  inOutBounce  outInBounce
+				
+			mods_ease = {}
+			--beat-based ease functions
+			--{beat_start, beat_end, mod_start, mod_end, mod_function, len_or_end, ease_type, sustainbeats, optional_param1, optional_param2}
+			--mod_function gets passed a number as a parameter which can then be used to manipulate 
+			funcs_ease = {}
+
+			--this is both a message broadcaster and a function runner
+			--if you put {beat,'String'}, then 'String' is broadcast as a message on that beat
+			--if you put {beat,function() somecode end}, then function() is run at that beat
+			--see example on beat 0
+			curaction = 1;
+			--{beat,thing,persists}
+			mod_actions = {}
+
+			-- util functions
+			
+			function rotatePoint(x1, y1, x2, y2, angle)
+        angle = math.rad(angle)
+        local rotatedX = math.cos(angle) * (x1 - x2) - math.sin(angle) * (y1 - y2) + x2;
+        local rotatedY = math.sin(angle) * (x1 - x2) + math.cos(angle) * (y1 - y2) + y2;
+
+				return rotatedX, rotatedY
+			end
+
+			-- mod table shortcuts
+			-- also, please dont scream at me
+			-- i would use function(...) table.insert(mods, {...}) end but i think thats only for like 5.2 or something which sucks
+			-- table.unpack and unpack dont exist either
+
+			local m = function(beat_start, beat_end, modss, len_or_end, player_number)
+				table.insert(mods, {beat_start, beat_end, modss, len_or_end, player_number})
+			end
+			local me = function(beat_start, beat_end, mod_start, mod_end, mod, len_or_end, ease_type, player_number, sustainbeats, optional_param1, optional_param2)
+				table.insert(mods_ease, {beat_start, beat_end, mod_start, mod_end, mod, len_or_end, ease_type, player_number, sustainbeats, optional_param1, optional_param2})
+			end
+			local fe = function(beat_start, beat_end, mod_start, mod_end, mod_function, len_or_end, ease_type, sustainbeats, optional_param1, optional_param2)
+				table.insert(funcs_ease, {beat_start, beat_end, mod_start, mod_end, mod_function, len_or_end, ease_type, sustainbeats, optional_param1, optional_param2})
+			end
+			local ma = function(beat, thing, persists)
+				table.insert(mod_actions, {beat, thing, persists})
+			end
+
+			-- the Meat (aka the mods)
+
+			m(0, math.pow(69, 4), '*-1 3.5x', 'end')
+			ma(0, function() P1:x(sw/2); P2:x(sw/2) end, true)
+			
+---------------------------------------------------------------------------------------
+----------------------If you're starting out, ignore like everything below this--------
+---------------------------------------------------------------------------------------
+			
+			function modtable_compare(a,b)
+				return a[1] < b[1]
+			end
+			
+			if table.getn(mod_actions) > 1 then
+				table.sort(mod_actions, modtable_compare)
+			end
+			
+			self:queuecommand('Update');
+			
+		end"
+		
+		UpdateCommand="%function(self)
+		
+			local beat = GAMESTATE:GetSongBeat()
+		
+			if beat>=0 and not checked then
+					local ThingsToGrab = {'BPMDisplay','LifeFrame','ScoreFrame','Lyrics','SongBackground','SongForeground','Overlay','Underlay'}
+					local ThingsToHide = {'BPMDisplay','ScoreFrame','Overlay','Underlay'}
+					for pn=1,8 do
+						_G['P'..pn] = SCREENMAN:GetTopScreen():GetChild('PlayerP'..pn) or nil;
+						if _G['P'..pn] then
+							table.insert(mod_plr, _G['P'..pn])
+							_G['jud'..pn]=_G['P'..pn]:GetChild('Judgment');
+							_G['com'..pn]=_G['P'..pn]:GetChild('Combo');
+						end
+						table.insert(ThingsToGrab,'LifeP'..pn); table.insert(ThingsToGrab,'ScoreP'..pn);
+						table.insert(ThingsToHide,'LifeP'..pn); table.insert(ThingsToHide,'ScoreP'..pn);
+					end	
+					for i,v in ipairs(ThingsToGrab) do _G[v] = SCREENMAN:GetTopScreen():GetChild(v) or nil end	
+					for i,v in ipairs(ThingsToHide) do if _G[v] then _G[v]:hidden(1) end end
+				checked = true;
+			end
+
+---------------------------------------------------------------------------------------
+----------------------Begin table handlers---------------------------------------------
+---------------------------------------------------------------------------------------
+			
+			disable = false;
+			if disable ~= true and checked then
+				
+				if beat > mod_firstSeenBeat+0.1 then -- performance coding!! --
+				-----------------------
+				-- Player mod resets --
+				-----------------------				
+					for i=1,2 do
+						GAMESTATE:ApplyModifiers('clearall',i)
+						if _G['init_modsp'..i] then 
+							GAMESTATE:ApplyModifiers(_G['init_modsp'..i],i)
+						end
+					end
+				
+				------------------------------------------------------------------------------
+				-- custom mod reader by TaroNuke edited by WinDEU and re-stolen by TaroNuke --
+				------------------------------------------------------------------------------
+					for i,v in pairs(mods) do
+						if v and table.getn(v) > 3 and v[1] and v[2] and v[3] and v[4] then
+							if beat >=v[1] then
+								if (v[4] == 'len' and beat <=v[1]+v[2]) or (v[4] == 'end' and beat <=v[2]) then
+									if table.getn(v) == 5 then
+										GAMESTATE:ApplyModifiers(v[3],v[5]);
+									else
+										GAMESTATE:ApplyModifiers(v[3]);
+									end
+								end
+							end
+						else
+							v[1] = 0;
+							v[2] = 0;
+							v[3] = '';
+							v[4] = 'error';
+							SCREENMAN:SystemMessage('Bad mod in beat-based table (line '..i..')');
+						end
+					end
+
+					-----------------------------------------------------------------------------------------------------
+				-- WinDEU's time-based len/end version of the #swag custom mod reader #teamproofofconcept (c) 2015 --
+				-----------------------------------------------------------------------------------------------------
+				if beat > mod_firstSeenBeat+0.1 then -- performance coding!! --
+					for i,v in pairs(mods2) do
+						if v and table.getn(v) > 3 and v[1] and v[2] and v[3] and v[4] then
+							if mod_time >=v[1] then
+								if (v[4] == 'len' and mod_time <=v[1]+v[2]) or (v[4] == 'end' and mod_time <=v[2]) then
+									if table.getn(v) == 5 then
+										GAMESTATE:ApplyModifiers(v[3],v[5]);
+									else
+										GAMESTATE:ApplyModifiers(v[3]);
+									end
+								end
+							end
+						else
+							v[1] = 0;
+							v[2] = 0;
+							v[3] = 'error';
+							v[4] = 'error';
+							SCREENMAN:SystemMessage('Bad mod in time-based table (line '..i..')');
+						end
+					end
+				end
+				-------------------------------------------------------------
+				-- exschwasion presents ease mod reader v2.5, compact mode --
+				-------------------------------------------------------------
+				if beat > mod_firstSeenBeat+0.1 then -- performance coding!! --
+					for i,v in pairs(mods_ease) do
+						if v and table.getn(v) > 6 and v[1] and v[2] and v[3] and v[4] and v[5] and v[6] and v[7] then
+							if beat >=v[1] then
+								if (v[6] == 'len' and beat <=v[1]+v[2]) or (v[6] == 'end' and beat <=v[2]) then
+									local strength = v[7](beat - v[1], v[3], v[4] - v[3], v[6] == 'end' and v[2] - v[1] or v[2], v[10], v[11])
+									local modstr = v[5] == 'xmod' and strength..'x' or (v[5] == 'cmod' and 'C'..strength or strength..' '..v[5])
+									GAMESTATE:ApplyGameCommand('mod,*-1 '..modstr,v[8]);
+								elseif (v[9] and ((v[6] == 'len' and beat <=v[1]+v[2]+v[9]) or (v[6] == 'end' and beat <=v[9]))) then
+									local modstr = v[5] == 'xmod' and v[4]..'x' or (v[5] == 'cmod' and 'C'..v[4] or v[4]..' '..v[5])
+									GAMESTATE:ApplyModifiers('*-1 '..modstr,v[8]);
+								end
+							end
+						else
+							SCREENMAN:SystemMessage('Bad mod in beat-based ease table (line '..i..')');
+						end
+					end
+				end
+				
+				---------------------------------------------------
+				-- ease function reader, thanks melody and hal   --
+				---------------------------------------------------
+				if beat > mod_firstSeenBeat+0.1 then
+					local t = {}
+					for i,v in pairs(funcs_ease) do
+						if v and table.getn(v) > 6 and v[1] and v[2] and v[3] and v[4] and v[5] and v[6] and v[7] then
+							if beat >=v[1] then
+								if (v[6] == 'len' and beat <=v[1]+v[2]) or (v[6] == 'end' and beat <=v[2]) then
+									local strength = v[7](beat - v[1], v[3], v[4] - v[3], v[6] == 'end' and v[2] - v[1] or v[2], v[9], v[10])
+									v[5](strength)
+								elseif (v[8] and ((v[6] == 'len' and beat <=v[1]+v[2]+v[8]) or (v[6] == 'end' and beat <=v[8]))) then
+									v[5](v[4])
+								end
+							end
+							table.insert(t,v)
+						else
+							SCREENMAN:SystemMessage('Bad mod in beat-based ease function table (line '..i..')');
+						end
+					end
+					funcs_ease = t
+				end
+
+				------------------------------------------------------------------
+				-- Perframe stuff (Advanced Techniques involving actual coding) --
+				------------------------------------------------------------------
+
+				--[[if perframe(0, 31) then
+					-- do stuff
+				end]]
+				
+				---------------------------------------
+				-- Actions table --
+				---------------------------------------
+					while curaction<=table.getn(mod_actions) and GAMESTATE:GetSongBeat()>=mod_actions[curaction][1] do
+						if mod_actions[curaction][3] or GAMESTATE:GetSongBeat() < mod_actions[curaction][1]+2 then
+							if type(mod_actions[curaction][2]) == 'function' then
+								mod_actions[curaction][2]()
+							elseif type(mod_actions[curaction][2]) == 'string' then
+								MESSAGEMAN:Broadcast(mod_actions[curaction][2]);
+							end
+						end
+						curaction = curaction+1;
+					end
+				end
+				
+			end
+			
+			self:sleep(0.01);
+			self:queuecommand('Update');
+
+---------------------------------------------------------------------------------------
+----------------------END DON'T TOUCH IT KIDDO-----------------------------------------
+---------------------------------------------------------------------------------------
+			
+		end"
+		
+	/>
+
+	<Layer
+        Type="ActorFrameTexture"
+        InitCommand="%function(self)
+        self:SetWidth(DISPLAY:GetDisplayWidth());
+        self:SetHeight(DISPLAY:GetDisplayHeight());
+        self:EnableDepthBuffer(false);
+        self:EnableAlphaBuffer(false);
+        self:EnableFloat(false);
+        self:EnablePreserveTexture(true);
+        self:Create();
+        prefix_aft=self;
+        end"
+    />
+    <!--<Layer
+        Type="Sprite"
+        Frag="shaders/hglitch.frag"
+		HShowMessageCommand="%function(self) self:hidden(0) end"
+		HHideMessageCommand="%function(self) self:hidden(1) end"
+        InitCommand="%function(self)
+        self:basezoomx((SCREEN_WIDTH/DISPLAY:GetDisplayWidth()));
+        self:basezoomy(-1*(SCREEN_HEIGHT/DISPLAY:GetDisplayHeight()))
+        self:x(SCREEN_CENTER_X);
+        self:y(SCREEN_CENTER_Y);
+        self:SetTexture(prefix_aft:GetTexture())
+        mysprite=self
+				mysprite:GetShader():uniform1f('amount',2.0)
+        end"
+    />-->
+		
+</children></ActorFrame>
